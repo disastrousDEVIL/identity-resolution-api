@@ -19,6 +19,9 @@ app.get("/testdb", async (req: Request, res: Response) => {
   try {
     const result = await client.query("SELECT NOW()");
     res.json(result.rows);
+  } catch (error: any) {
+    console.error("❌ DB Test Error:", error.message);
+    res.status(500).json({ error: "Database connection failed" });
   } finally {
     client.release();
   }
@@ -58,8 +61,9 @@ app.post("/identify", async (req: Request, res: Response) => {
     // 3️⃣ Handle multiple primaries (merge logic)
     const primaries = contacts.filter(c => c.linkprecedence === "primary");
     if (primaries.length > 1) {
-      // Oldest becomes the final primary
-      primaries.sort((a, b) => new Date(a.createdat).getTime() - new Date(b.createdat).getTime());
+      primaries.sort(
+        (a, b) => new Date(a.createdat).getTime() - new Date(b.createdat).getTime()
+      );
       const finalPrimary = primaries[0];
       const toDemote = primaries.slice(1);
 
@@ -90,11 +94,11 @@ app.post("/identify", async (req: Request, res: Response) => {
       contacts = unified.rows;
     }
 
-    // 4️⃣ If request email/phone is new, insert as secondary under the found cluster
-    const exists = contacts.some(
-      (c) => c.email === email || c.phonenumber === phoneNumber
-    );
-    if (!exists) {
+    // 4️⃣ If request email/phone is new, insert as secondary
+    const emailExists = contacts.some(c => c.email === email);
+    const phoneExists = contacts.some(c => c.phonenumber === phoneNumber);
+
+    if (!emailExists || !phoneExists) {
       const primary = contacts.find(c => c.linkprecedence === "primary")!;
       const insert = await client.query(
         `INSERT INTO contact (email, phonenumber, linkprecedence, linkedid) 
@@ -107,6 +111,9 @@ app.post("/identify", async (req: Request, res: Response) => {
 
     // 5️⃣ Build final response
     res.json(buildResponse(contacts));
+  } catch (error: any) {
+    console.error("❌ Identify Error:", error.message);
+    res.status(500).json({ error: "Internal server error" });
   } finally {
     client.release();
   }
@@ -125,16 +132,21 @@ function buildResponse(contacts: any[]) {
       emails,
       phoneNumbers,
       secondaryContactIds: secondaryIds,
-    }
+    },
   };
 }
 
-// 5️⃣ Get all contacts
+// 5️⃣ Get all contacts (for debugging)
 app.get("/contacts", async (req: Request, res: Response) => {
   const client = await pool.connect();
   try {
-    const result = await client.query("SELECT * FROM contact WHERE deletedat IS NULL");
+    const result = await client.query(
+      "SELECT * FROM contact WHERE deletedat IS NULL ORDER BY id"
+    );
     res.json(result.rows);
+  } catch (error: any) {
+    console.error("❌ Contacts Error:", error.message);
+    res.status(500).json({ error: "Failed to fetch contacts" });
   } finally {
     client.release();
   }
