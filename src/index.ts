@@ -10,8 +10,49 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
+// Helper function to force IPv4 connection
+function getDatabaseUrl() {
+  let url = process.env.DATABASE_URL!;
+  
+  // Log the original URL for debugging
+  console.log("🔍 Original DATABASE_URL:", url);
+  
+  // If it's a Supabase URL, try to force IPv4
+  if (url.includes('supabase.co')) {
+    try {
+      // Parse the URL to extract components
+      const urlObj = new URL(url);
+      const hostname = urlObj.hostname;
+      
+      // Try different approaches to force IPv4
+      let newHostname = hostname;
+      
+      // Approach 1: Try with ipv4 prefix
+      if (hostname.startsWith('db.')) {
+        newHostname = hostname.replace('db.', 'db.ipv4.');
+      }
+      
+      // Approach 2: If that doesn't work, try with explicit IPv4
+      if (newHostname === hostname) {
+        newHostname = hostname.replace('supabase.co', 'ipv4.supabase.co');
+      }
+      
+      urlObj.hostname = newHostname;
+      url = urlObj.toString();
+      
+      console.log("🔧 Modified DATABASE_URL for IPv4:", url);
+    } catch (error) {
+      console.error("❌ Error modifying DATABASE_URL:", error);
+      // Fall back to original URL
+    }
+  }
+  
+  return url;
+}
+
 console.log("🚀 Starting application...");
 console.log("📡 Database URL configured:", process.env.DATABASE_URL ? "Yes" : "No");
+console.log("🔧 Using modified URL for IPv4 compatibility");
 
 // 1️⃣ Setup express app
 const app = express();
@@ -19,7 +60,7 @@ app.use(express.json());
 
 // 2️⃣ Setup Postgres pool
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: getDatabaseUrl(),
   ssl: { rejectUnauthorized: false },  // required by Supabase
   connectionTimeoutMillis: 10000, // 10 seconds
   idleTimeoutMillis: 30000, // 30 seconds
