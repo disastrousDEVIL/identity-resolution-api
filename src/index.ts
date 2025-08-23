@@ -11,6 +11,7 @@ app.use(express.json());
 // 2️⃣ Setup Postgres pool
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }  // required by Supabase
 });
 
 // 3️⃣ Health check for DB
