@@ -17,32 +17,36 @@ function getDatabaseUrl() {
   // Log the original URL for debugging
   console.log("🔍 Original DATABASE_URL:", url);
   
-  // If it's a Supabase URL, try to force IPv4
+  // For Supabase, we need to use the direct connection string
+  // The issue is likely that we need to use the correct Supabase connection format
   if (url.includes('supabase.co')) {
     try {
       // Parse the URL to extract components
       const urlObj = new URL(url);
       const hostname = urlObj.hostname;
       
-      // Try different approaches to force IPv4
-      let newHostname = hostname;
+      // For Supabase, we should use the direct connection without modifications
+      // The issue might be with the connection string format itself
+      console.log("🔧 Using original Supabase URL (no modifications needed)");
       
-      // Approach 1: Try with ipv4 prefix
-      if (hostname.startsWith('db.')) {
-        newHostname = hostname.replace('db.', 'db.ipv4.');
+      // Ensure we have the correct SSL settings for Supabase
+      if (!url.includes('sslmode=')) {
+        url += (url.includes('?') ? '&' : '?') + 'sslmode=require';
       }
       
-      // Approach 2: If that doesn't work, try with explicit IPv4
-      if (newHostname === hostname) {
-        newHostname = hostname.replace('supabase.co', 'ipv4.supabase.co');
+      // Add connection parameters for better compatibility
+      if (!url.includes('connect_timeout=')) {
+        url += (url.includes('?') ? '&' : '?') + 'connect_timeout=30';
       }
       
-      urlObj.hostname = newHostname;
-      url = urlObj.toString();
+      // Add application_name for better debugging
+      if (!url.includes('application_name=')) {
+        url += (url.includes('?') ? '&' : '?') + 'application_name=bitespeed-identity';
+      }
       
-      console.log("🔧 Modified DATABASE_URL for IPv4:", url);
+      console.log("🔧 Final DATABASE_URL:", url);
     } catch (error) {
-      console.error("❌ Error modifying DATABASE_URL:", error);
+      console.error("❌ Error processing DATABASE_URL:", error);
       // Fall back to original URL
     }
   }
@@ -61,8 +65,10 @@ app.use(express.json());
 // 2️⃣ Setup Postgres pool
 const pool = new Pool({
   connectionString: getDatabaseUrl(),
-  ssl: { rejectUnauthorized: false },  // required by Supabase
-  connectionTimeoutMillis: 10000, // 10 seconds
+  ssl: { 
+    rejectUnauthorized: false
+  },  // required by Supabase
+  connectionTimeoutMillis: 30000, // 30 seconds
   idleTimeoutMillis: 30000, // 30 seconds
   max: 20, // maximum number of clients in the pool
 });
@@ -73,18 +79,31 @@ app.get("/testdb", async (req: Request, res: Response) => {
   console.log("📡 DATABASE_URL:", process.env.DATABASE_URL ? "Set" : "Not set");
   
   try {
+    console.log("🔌 Attempting to connect to database...");
     const client = await pool.connect();
-    const result = await client.query("SELECT NOW()");
+    console.log("🔌 Connected successfully, running test query...");
+    const result = await client.query("SELECT NOW() as current_time, version() as pg_version");
     client.release();
     console.log("✅ Database connection successful");
-    res.json(result.rows);
+    console.log("📊 Query result:", result.rows[0]);
+    res.json({
+      success: true,
+      data: result.rows[0],
+      message: "Database connection successful"
+    });
   } catch (error: any) {
     console.error("❌ DB Test Error:", error.message);
     console.error("🔍 Error details:", error);
+    console.error("🔍 Error code:", error.code);
+    console.error("🔍 Error errno:", error.errno);
+    console.error("🔍 Error syscall:", error.syscall);
+    
     res.status(500).json({ 
       error: "Database connection failed", 
       details: error.message,
-      code: error.code 
+      code: error.code,
+      errno: error.errno,
+      syscall: error.syscall
     });
   }
 });
