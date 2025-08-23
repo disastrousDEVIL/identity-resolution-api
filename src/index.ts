@@ -73,14 +73,17 @@ app.use(express.json());
 // 2️⃣ Setup Postgres pool
 const pool = new Pool({
   connectionString: getDatabaseUrl(),
-  ssl: { 
+  ssl: {
     rejectUnauthorized: false,
     ca: undefined,
-    checkServerIdentity: () => undefined
-  },  // required by Supabase
-  connectionTimeoutMillis: 30000, // 30 seconds
-  idleTimeoutMillis: 30000, // 30 seconds
-  max: 20, // maximum number of clients in the pool
+    checkServerIdentity: () => undefined,
+    secureProtocol: 'TLSv1_2_method',
+    minVersion: 'TLSv1.2',
+    maxVersion: 'TLSv1.3'
+  },
+  connectionTimeoutMillis: 30000,
+  idleTimeoutMillis: 30000,
+  max: 20,
 });
 
 // 3️⃣ Health check for DB
@@ -243,7 +246,101 @@ app.get("/contacts", async (req: Request, res: Response) => {
   }
 });
 
-// 6️⃣ Start server
+// 6️⃣ Delete specific contact by ID
+app.delete("/contacts/:id", async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const contactId = parseInt(id);
+
+  if (isNaN(contactId)) {
+    return res.status(400).json({ error: "Invalid contact ID" });
+  }
+
+  const client = await pool.connect();
+  try {
+    // Check if contact exists and is not already deleted
+    const existingContact = await client.query(
+      "SELECT * FROM contact WHERE id = $1 AND deletedat IS NULL",
+      [contactId]
+    );
+
+    if (existingContact.rows.length === 0) {
+      return res.status(404).json({ error: "Contact not found or already deleted" });
+    }
+
+    const contact = existingContact.rows[0];
+
+    // If it's a primary contact, handle cascade deletion of linked contacts
+    if (contact.linkprecedence === "primary") {
+      // Soft delete all secondary contacts linked to this primary
+      await client.query(
+        "UPDATE contact SET deletedat = NOW(), updatedat = NOW() WHERE linkedid = $1 AND deletedat IS NULL",
+        [contactId]
+      );
+    } else if (contact.linkprecedence === "secondary" && contact.linkedid) {
+      // If it's a secondary contact, check if we need to promote another secondary to primary
+      const remainingSecondaries = await client.query(
+        "SELECT * FROM contact WHERE linkedid = $1 AND id != $2 AND deletedat IS NULL ORDER BY createdat",
+        [contact.linkedid, contactId]
+      );
+
+      // If this was the only secondary contact, we might want to handle the primary differently
+      if (remainingSecondaries.rows.length === 0) {
+        // No other secondaries exist, just delete this one
+        console.log("Deleting last secondary contact for primary:", contact.linkedid);
+      }
+    }
+
+    // Soft delete the target contact
+    await client.query(
+      "UPDATE contact SET deletedat = NOW(), updatedat = NOW() WHERE id = $1",
+      [contactId]
+    );
+
+    res.json({ 
+      success: true, 
+      message: "Contact deleted successfully",
+      deletedContactId: contactId
+    });
+  } catch (error: any) {
+    console.error("❌ Delete Contact Error:", error.message);
+    res.status(500).json({ error: "Failed to delete contact" });
+  } finally {
+    client.release();
+  }
+});
+
+// 7️⃣ Delete all contacts
+app.delete("/contacts", async (req: Request, res: Response) => {
+  const { confirm } = req.query;
+
+  // Require confirmation to prevent accidental deletion
+  if (confirm !== "true") {
+    return res.status(400).json({ 
+      error: "Confirmation required. Add ?confirm=true to the URL to confirm deletion of all contacts." 
+    });
+  }
+
+  const client = await pool.connect();
+  try {
+    // Soft delete all contacts
+    const result = await client.query(
+      "UPDATE contact SET deletedat = NOW(), updatedat = NOW() WHERE deletedat IS NULL"
+    );
+
+    res.json({ 
+      success: true, 
+      message: "All contacts deleted successfully",
+      deletedCount: result.rowCount
+    });
+  } catch (error: any) {
+    console.error("❌ Delete All Contacts Error:", error.message);
+    res.status(500).json({ error: "Failed to delete all contacts" });
+  } finally {
+    client.release();
+  }
+});
+
+// 8️⃣ Start server
 app.listen(3000, () => {
   console.log("🚀 Server running at http://localhost:3000");
 });
