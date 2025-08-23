@@ -4,6 +4,15 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+// 0️⃣ Validate environment variables
+if (!process.env.DATABASE_URL) {
+  console.error("❌ DATABASE_URL environment variable is not set!");
+  process.exit(1);
+}
+
+console.log("🚀 Starting application...");
+console.log("📡 Database URL configured:", process.env.DATABASE_URL ? "Yes" : "No");
+
 // 1️⃣ Setup express app
 const app = express();
 app.use(express.json());
@@ -11,20 +20,31 @@ app.use(express.json());
 // 2️⃣ Setup Postgres pool
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }  // required by Supabase
+  ssl: { rejectUnauthorized: false },  // required by Supabase
+  connectionTimeoutMillis: 10000, // 10 seconds
+  idleTimeoutMillis: 30000, // 30 seconds
+  max: 20, // maximum number of clients in the pool
 });
 
 // 3️⃣ Health check for DB
 app.get("/testdb", async (req: Request, res: Response) => {
-  const client = await pool.connect();
+  console.log("🔍 Testing database connection...");
+  console.log("📡 DATABASE_URL:", process.env.DATABASE_URL ? "Set" : "Not set");
+  
   try {
+    const client = await pool.connect();
     const result = await client.query("SELECT NOW()");
+    client.release();
+    console.log("✅ Database connection successful");
     res.json(result.rows);
   } catch (error: any) {
     console.error("❌ DB Test Error:", error.message);
-    res.status(500).json({ error: "Database connection failed" });
-  } finally {
-    client.release();
+    console.error("🔍 Error details:", error);
+    res.status(500).json({ 
+      error: "Database connection failed", 
+      details: error.message,
+      code: error.code 
+    });
   }
 });
 
