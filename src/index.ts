@@ -19,7 +19,7 @@ function getDatabaseUrl() {
   
   // For Supabase, we need to use the direct connection string
   // The issue is likely that we need to use the correct Supabase connection format
-  if (url.includes('supabase.co')) {
+  if (url.includes('supabase.co') || url.includes('pooler.supabase.com')) {
     try {
       // Parse the URL to extract components
       const urlObj = new URL(url);
@@ -32,6 +32,14 @@ function getDatabaseUrl() {
       // Ensure we have the correct SSL settings for Supabase
       if (!url.includes('sslmode=')) {
         url += (url.includes('?') ? '&' : '?') + 'sslmode=require';
+      }
+      
+      // For pooler connections, add specific SSL parameters
+      if (url.includes('pooler.supabase.com')) {
+        console.log("🔧 Detected Supabase pooler connection");
+        if (!url.includes('sslmode=require')) {
+          url = url.replace('sslmode=require', 'sslmode=require&ssl=true');
+        }
       }
       
       // Add connection parameters for better compatibility
@@ -66,7 +74,9 @@ app.use(express.json());
 const pool = new Pool({
   connectionString: getDatabaseUrl(),
   ssl: { 
-    rejectUnauthorized: false
+    rejectUnauthorized: false,
+    ca: undefined,
+    checkServerIdentity: () => undefined
   },  // required by Supabase
   connectionTimeoutMillis: 30000, // 30 seconds
   idleTimeoutMillis: 30000, // 30 seconds
